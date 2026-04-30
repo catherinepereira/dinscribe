@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dinscribe"
+version = "0.1.1"
+description = "Audio denoising and transcription pipeline using Demucs, Silero VAD, and Whisper"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "demucs>=4.0.0",
+    "torchcodec",
+    "torch",
+    "pydub",
+    "packaging",
+    "openai-whisper",
+    "pyyaml",
+]
+
+[project.scripts]
+dinscribe = "dinscribe.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+dinscribe = ["config.yaml", "vocab.txt"]

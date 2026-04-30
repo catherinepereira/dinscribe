@@ -2,21 +2,18 @@
 Uses Silero VAD to detect speech segments in denoised audio and writes a JSON file with segment boundaries.
 """
 
-import argparse
 import json
-import sys
 from pathlib import Path
 import torch
-from utils import AUDIO_EXTENSIONS, load_config, cuda_available, warn_if_no_cuda
+from .utils import cuda_available
+from .config import VadConfig
 
-# Loaded once per process
 _vad_model_cache = None
 
 
 def _load_model():
     global _vad_model_cache
     if _vad_model_cache is None:
-        print("Loading VAD model...")
         torch.set_num_threads(1)
         model, utils = torch.hub.load(
             repo_or_dir="snakers4/silero-vad",
@@ -31,18 +28,18 @@ def _load_model():
     return _vad_model_cache
 
 
-def _detect_segments(audio_path: Path, config: dict):
+def _detect_segments(audio_path: Path, config: VadConfig):
     """Run Silero VAD and return (segments, duration_ms).
 
     segments is a list of [start_ms, end_ms] pairs.
     """
-    threshold = config.get("threshold", 0.5)
-    min_speech_ms = config.get("min_speech_duration_ms", None)
-    min_silence_ms = config.get("min_silence_duration_ms", None)
-    padding_ms = config.get("padding_ms", 500) or 0
-    max_seg_sec = config.get("max_segment_length_sec", 30)
-    merge_within_sec = config.get("merge_within_sec", 1.0)
-    sample_rate = 16000  # required by Silero VAD
+    threshold = config.threshold
+    min_speech_ms = config.min_speech_duration_ms
+    min_silence_ms = config.min_silence_duration_ms
+    padding_ms = config.padding_ms or 0
+    max_seg_sec = config.max_segment_length_sec
+    merge_within_sec = config.merge_within_sec
+    sample_rate = 16000
 
     model, get_speech_timestamps, read_audio, device = _load_model()
 
@@ -61,7 +58,6 @@ def _detect_segments(audio_path: Path, config: dict):
         vad_kwargs["min_silence_duration_ms"] = min_silence_ms
     speech_timestamps = get_speech_timestamps(wav, model, **vad_kwargs)
 
-    # Convert sample indices to ms and apply padding
     samples_per_ms = sample_rate / 1000
     segments = []
     for ts in speech_timestamps:
@@ -72,7 +68,6 @@ def _detect_segments(audio_path: Path, config: dict):
         if start_ms < end_ms:
             segments.append([start_ms, end_ms])
 
-    # Merge nearby segments
     if merge_within_sec is not None:
         merge_gap_ms = merge_within_sec * 1000
         merged = []
@@ -83,7 +78,6 @@ def _detect_segments(audio_path: Path, config: dict):
                 merged.append([start_ms, end_ms])
         segments = merged
 
-    # Discard segments that exceed the maximum length
     if max_seg_sec is not None:
         max_ms = max_seg_sec * 1000
         segments = [[s, e] for s, e in segments if e - s <= max_ms]
@@ -91,7 +85,7 @@ def _detect_segments(audio_path: Path, config: dict):
     return segments, duration_ms
 
 
-def _build_output(audio_path: Path, segments: list, duration_ms: float, config: dict) -> dict:
+def _build_output(audio_path: Path, segments: list, duration_ms: float, config: VadConfig) -> dict:
     total_speech_ms = sum(e - s for s, e in segments)
     return {
         "metadata": {
@@ -99,9 +93,9 @@ def _build_output(audio_path: Path, segments: list, duration_ms: float, config: 
             "audio_duration_ms": duration_ms,
             "total_speech_ms": total_speech_ms,
             "segment_count": len(segments),
-            "vad_threshold": config.get("threshold", 0.5),
-            "max_segment_length_sec": config.get("max_segment_length_sec", 30),
-            "merge_within_sec": config.get("merge_within_sec", 1.0),
+            "vad_threshold": config.threshold,
+            "max_segment_length_sec": config.max_segment_length_sec,
+            "merge_within_sec": config.merge_within_sec,
         },
         "segments": [
             {"segment_id": i, "start_ms": s, "end_ms": e, "duration_ms": e - s}
@@ -110,7 +104,7 @@ def _build_output(audio_path: Path, segments: list, duration_ms: float, config: 
     }
 
 
-def run(input_path: Path, output_dir: Path, config: dict, force: bool = False) -> Path:
+def run(input_path: Path, output_dir: Path, config: VadConfig = VadConfig(), force: bool = False) -> Path:
     """Run Silero VAD on a single audio file. Returns path to vad.json."""
     output_file = output_dir / f"{output_dir.name}_vad.json"
     if not force and output_file.exists():
@@ -126,52 +120,3 @@ def run(input_path: Path, output_dir: Path, config: dict, force: bool = False) -
         json.dump(output, f, indent=2, ensure_ascii=False)
 
     return output_file
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Detect speech segments using Silero VAD"
-    )
-    parser.add_argument("input")
-    parser.add_argument("-o", "--output", default="output")
-    parser.add_argument("-c", "--config", default="config.yaml")
-    parser.add_argument("-f", "--force", action="store_true")
-    args = parser.parse_args()
-
-    config = load_config(args.config, "vad")
-    warn_if_no_cuda()
-    input_path = Path(args.input)
-    output_dir = Path(args.output)
-
-    if input_path.is_file():
-        files = [input_path]
-    elif input_path.is_dir():
-        files = sorted(f for f in input_path.iterdir() if f.suffix.lower() in AUDIO_EXTENSIONS)
-        if not files:
-            print(f"No audio files found in {input_path}")
-            sys.exit(1)
-    else:
-        print(f"Not found: {input_path}")
-        sys.exit(1)
-
-    for audio_file in files:
-        out_file = output_dir / audio_file.stem / f"{audio_file.stem}_vad.json"
-        if not args.force and out_file.exists():
-            print(f"\nSkipping {audio_file.name} (cached)")
-            print(f"  -> {out_file}")
-            continue
-        print(f"\nProcessing: {audio_file.name}")
-        try:
-            out = run(audio_file, output_dir / audio_file.stem, config, force=args.force)
-            meta = json.loads(out.read_text(encoding="utf-8"))["metadata"]
-            print(f"  {meta['segment_count']} segments  "
-                  f"({meta['total_speech_ms'] / 1000:.1f}s speech / "
-                  f"{meta['audio_duration_ms'] / 1000:.1f}s total)")
-            print(f"  -> {out}")
-        except Exception as e:
-            print(f"  FAILED: {e}")
-            sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

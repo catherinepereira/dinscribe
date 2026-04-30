@@ -2,17 +2,15 @@
 Transcribes speech segments from denoised audio using Whisper.
 """
 
-import argparse
 import json
 import shutil
-import sys
 from pathlib import Path
 from typing import Optional
 from pydub import AudioSegment
 import whisper
-from utils import load_config, progress_bar, cuda_available, warn_if_no_cuda
+from .utils import cuda_available
+from .config import TranscribeConfig
 
-# Loaded once per process, keyed by (model_name, device)
 _whisper_cache: dict = {}
 
 
@@ -38,12 +36,11 @@ def _load_vocabulary(vocab_file: Optional[str]) -> str:
     return f"Common terms: {', '.join(terms)}." if terms else ""
 
 
-
 def run(
     audio_path: Path,
     vad_path: Path,
     output_dir: Path,
-    config: dict,
+    config: TranscribeConfig = TranscribeConfig(),
     on_segment=None,
     force: bool = False,
 ) -> Path:
@@ -53,14 +50,14 @@ def run(
         return output_file
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    model_name = config.get("model", "base")
-    language = config.get("language", "en")
-    temperature = config.get("temperature", None)
-    no_speech_threshold = config.get("no_speech_threshold", None)
-    logprob_threshold = config.get("logprob_threshold", None)
-    compression_ratio_threshold = config.get("compression_ratio_threshold", None)
-    condition_on_previous_text = config.get("condition_on_previous_text", False)
-    vocab_file = config.get("vocab_file", "vocab.txt")
+    model_name = config.model
+    language = config.language
+    temperature = config.temperature
+    no_speech_threshold = config.no_speech_threshold
+    logprob_threshold = config.logprob_threshold
+    compression_ratio_threshold = config.compression_ratio_threshold
+    condition_on_previous_text = config.condition_on_previous_text
+    vocab_file = config.vocab_file
 
     device = "cuda" if cuda_available() else "cpu"
     model = _load_model(model_name, device)
@@ -163,54 +160,3 @@ def run(
 def _write_json(path: Path, data: dict):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Transcribe audio segments using Whisper"
-    )
-    parser.add_argument("audio")
-    parser.add_argument("vad")
-    parser.add_argument("-o", "--output", default="output")
-    parser.add_argument("-c", "--config", default="config.yaml")
-    parser.add_argument("-f", "--force", action="store_true")
-    args = parser.parse_args()
-
-    config = load_config(args.config, "transcribe")
-    warn_if_no_cuda()
-    audio_path = Path(args.audio)
-    vad_path = Path(args.vad)
-    output_dir = Path(args.output) / audio_path.stem
-
-    if not audio_path.exists():
-        print(f"Audio file not found: {audio_path}")
-        sys.exit(1)
-    if not vad_path.exists():
-        print(f"VAD file not found: {vad_path}")
-        sys.exit(1)
-
-    def on_segment(current, total):
-        bar = progress_bar(current, total, width=30)
-        print(f"\r  [{bar}] {current}/{total}", end="", flush=True)
-        if current == total:
-            print()
-
-    out_file = output_dir / f"{audio_path.stem}_transcription.json"
-    if not args.force and out_file.exists():
-        print(f"Skipping {audio_path.name} (cached)")
-        print(f"  -> {out_file}")
-        return
-
-    print(f"Transcribing {audio_path.name}...")
-    try:
-        out = run(audio_path, vad_path, output_dir, config, on_segment=on_segment, force=args.force)
-        meta = json.loads(out.read_text(encoding="utf-8"))["metadata"]
-        print(f"  {meta['processed_segments']}/{meta['total_segments']} segments processed")
-        print(f"  -> {out}")
-    except Exception as e:
-        print(f"\n  FAILED: {e}")
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
