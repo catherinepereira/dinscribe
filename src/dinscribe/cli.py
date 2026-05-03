@@ -2,7 +2,7 @@ import argparse
 import sys
 import time
 from pathlib import Path
-from .utils import AUDIO_EXTENSIONS, load_config, warn_if_no_cuda, setup_user_config, get_config_dir, fmt_time
+from .utils import AUDIO_EXTENSIONS, load_config, warn_if_no_cuda, setup_user_config, fmt_time
 from .pipeline import process_file
 from .config import PipelineConfig
 
