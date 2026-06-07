@@ -37,7 +37,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/catherinepereira/dinscribe"
+Repository = "https://github.com/catherinepereira/dinscribe"
 "Bug Tracker" = "https://github.com/catherinepereira/dinscribe/issues"
 
 [project.scripts]
