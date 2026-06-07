@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dinscribe"
-version = "0.1.2"
+version = "0.2.0"
 description = "Audio denoising and transcription pipeline using Demucs, Silero VAD, and Whisper"
 readme = "README.md"
 license = { text = "MIT" }

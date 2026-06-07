@@ -31,6 +31,10 @@ class TranscribeConfig:
     condition_on_previous_text: bool = False
     """Use previous segment output as context. Improves coherence but can propagate errors."""
     vocab_file: Optional[str] = None
+    whole_file: bool = False
+    """Transcribe the whole file in one pass instead of slicing per VAD segment."""
+    word_timestamps: bool = False
+    """Request per-word timestamps and tighten each entry to its first/last word. Whole-file only."""
 
 
 @dataclass

@@ -63,6 +63,27 @@ def run(
     model = _load_model(model_name, device)
     initial_prompt = _load_vocabulary(vocab_file) or None
 
+    decode_kwargs = dict(
+        language=language,
+        fp16=(device == "cuda"),
+        condition_on_previous_text=condition_on_previous_text,
+        initial_prompt=initial_prompt,
+    )
+    if temperature is not None:
+        decode_kwargs["temperature"] = temperature
+    if no_speech_threshold is not None:
+        decode_kwargs["no_speech_threshold"] = no_speech_threshold
+    if logprob_threshold is not None:
+        decode_kwargs["logprob_threshold"] = logprob_threshold
+    if compression_ratio_threshold is not None:
+        decode_kwargs["compression_ratio_threshold"] = compression_ratio_threshold
+
+    if config.whole_file:
+        return _transcribe_whole_file(
+            audio_path, output_file, output_dir, model, decode_kwargs,
+            config=config, on_segment=on_segment,
+        )
+
     vad_data = json.loads(vad_path.read_text(encoding="utf-8"))
     segments = vad_data.get("segments", [])
     if not segments:
@@ -154,6 +175,70 @@ def run(
         if temp_dir.exists():
             shutil.rmtree(temp_dir)
 
+    return output_file
+
+
+def _segment_bounds(seg: dict, word_timestamps: bool) -> tuple[float, float]:
+    """Return (start_s, end_s), tightened to the first/last word when available."""
+    words = seg.get("words") or []
+    if word_timestamps and words:
+        return words[0].get("start", seg["start"]), words[-1].get("end", seg["end"])
+    return seg["start"], seg["end"]
+
+
+def _transcribe_whole_file(
+    audio_path: Path,
+    output_file: Path,
+    output_dir: Path,
+    model,
+    decode_kwargs: dict,
+    config: TranscribeConfig,
+    on_segment=None,
+) -> Path:
+    """Transcribe the whole file in one Whisper pass, one entry per Whisper segment.
+
+    With word_timestamps, each entry is tightened to its first and last word so
+    caption boundaries land on speech rather than Whisper's looser segment edges.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    result = model.transcribe(
+        str(audio_path), word_timestamps=config.word_timestamps, **decode_kwargs
+    )
+
+    no_speech_threshold = config.no_speech_threshold
+    transcription = []
+    segments = result.get("segments", [])
+    for i, seg in enumerate(segments, 1):
+        text = (seg.get("text") or "").strip()
+        if text and not (
+            no_speech_threshold is not None
+            and seg.get("no_speech_prob", 0) > no_speech_threshold
+        ):
+            start, end = _segment_bounds(seg, config.word_timestamps)
+            transcription.append({
+                "timestamp": {"start": start, "end": end},
+                "text": text,
+            })
+        if on_segment:
+            on_segment(i, len(segments))
+
+    output = {
+        "metadata": {
+            "source_audio": audio_path.name,
+            "model": config.model,
+            "language": config.language,
+            "temperature": config.temperature,
+            "no_speech_threshold": no_speech_threshold,
+            "logprob_threshold": config.logprob_threshold,
+            "compression_ratio_threshold": config.compression_ratio_threshold,
+            "total_segments": len(segments),
+            "processed_segments": len(segments),
+            "whole_file": True,
+            "word_timestamps": config.word_timestamps,
+        },
+        "transcription": transcription,
+    }
+    _write_json(output_file, output)
     return output_file
 
 
