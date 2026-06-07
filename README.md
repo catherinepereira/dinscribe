@@ -6,6 +6,14 @@ Processes audio through a three-step pipeline to produce a transcription JSON: d
 pip install dinscribe
 ```
 
+This installs CPU-only torch by default. For GPU acceleration, install the CUDA build first:
+```bash
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+pip install dinscribe
+```
+
+dinscribe uses CUDA automatically when available and warns at startup if it is not.
+
 On first run, dinscribe copies default config files to your platform config directory:
 - **Windows:** `%APPDATA%\dinscribe\`
 - **macOS:** `~/Library/Application Support/dinscribe/`
