@@ -1,4 +1,8 @@
 ## dinscribe audio transcription
+
+<img width="600" alt="dinscribe-cli" src="https://github.com/user-attachments/assets/866c3970-66e3-4a16-81c9-c5143e8b4021" />
+
+
 Processes audio through a three-step pipeline to produce a transcription JSON: denoising (demucs), voice activity detection (Silero VAD), and transcription (Whisper).
 
 ### Installation
